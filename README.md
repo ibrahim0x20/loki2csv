@@ -14,3 +14,5 @@ options:
   -s path, --signed path
                         Path to signed file
                       </pre>
+
+The signed files file is generated using sigcheck from Microsoft Sysinternals and saved as a csv file.
