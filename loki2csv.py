@@ -24,7 +24,7 @@ def is_valid_ip(ip_address):
 
 def VirustotalSearch(sha256_hash):
     # Replace 'YOUR_API_KEY' with your actual VirusTotal API key
-    api_key = '9c9e6974068334fd518a8a1c20b5d41962613c66903e836ac26aacea1331bf05'
+    api_key = 'YOUR_API_KEY'
 
     # Replace 'your_sha256_hash' with the SHA-256 hash of the file you want to check
     #sha256_hash = '06917fc270a0324e8d28da83bedf6d1638bb430876b8336dd326517d33251bb1'
@@ -212,20 +212,24 @@ def extract_data(line):
 processes = []
 files = []
 new_files = []
-signed_files = []
-    
-signed_file_path = "C:\\Users\\ihakami\\Desktop\\KACST-ITU\\jupyter\\signed-apps.csv"
+#signed_files = []
+sha2_column_index = ''
 
-with open(signed_file_path, 'r', newline='', encoding='utf-8') as input_file:
-    reader = csv.reader(input_file)
-    header = next(reader)  # Read and skip the header
-    sha2_column_index = header.index("SHA256")
-    signed_files = list(reader)
+def initialize_signed_files(args):
+
+    signed_file_path = args.signed
+    with open(signed_file_path, 'r', newline='', encoding='utf-8') as input_file:
+        reader = csv.reader(input_file)
+        header = next(reader)  # Read and skip the header
+        sha2_column_index = header.index("SHA256")
+        signed_files = list(reader)
+        
+    return signed_files
     
 loki_logs_db = []
 
    
-def loki2csv(filename):
+def loki2csv(filename, signed_files=None):
     
     strings_to_check = ['Starting Loki Scan', 'Initializing all YARA rules at once']
     with open(filename, "r", encoding='utf-8') as f:
@@ -246,10 +250,10 @@ def loki2csv(filename):
         match = re.search(pattern, ''.join(first_14_lines))
         if not match:
             print('Skipping: The Yara rules was not initialized correctly in this log file')
-            return
+            return    
         
+        # Counter for the number of lines processed for each file. This is needed for stacking all logs from all the time.
         
-        # Counter for the number of lines processed for each file. This is needed for stacking all logs over all the time.
         cnt = 0
         lines = lines[14:]
         
@@ -276,18 +280,25 @@ def loki2csv(filename):
                 # Enrich the data to make analysis easier: VirusTotal and Verified Signature
                 
                 if row:
-                    if row[3] == 'FileScan':  
-                        if row[8]:  # Assuming row[12] contains the SHA256 hash of the file
-                            is_signed = False  # Initialize a flag to track if the file is signed    
-                            for signed_line in signed_files:
-                                if row[8].lower() == signed_line[sha2_column_index].lower():
-                                    is_signed = True  # The file is signed
-                                    break
+                    
+                    if row[3] == 'FileScan':
+                        
+                        if row[8]:  # Assuming row[8] contains the SHA256 hash of the file
+                            is_signed = False  # Initialize a flag to track if the file is signed
+                            
+                            # Check if the file is signed! 
+                            
+                            if args.signed:
+                                for signed_line in signed_files:
+                                    sha2_column_index = 16
+                                    if row[8].lower() == signed_line[sha2_column_index].lower():
+                                        is_signed = True  # The file is signed
+                                        break
 
-                            if is_signed:
-                                row.append('Signed')
-                            else:
-                                row.append('Not Signed')
+                                if is_signed:
+                                    row.append('Signed')
+                                else:
+                                    row.append('Not Signed')
                             
                             # Check virustotal! 
                             if args.v:
@@ -297,9 +308,10 @@ def loki2csv(filename):
                                 else:
                                     row.append('Not Found')
                         else:
-                            row.append('')  # SHA256 hash is not available in the row
+                            if args.signed:
+                                row.append('')      # SHA256 hash is not available in the row. ==> for signed_files
                             if args.v:
-                                row.append('')
+                                row.append('')      # SHA256 hash is not available in the row. ==> for VirusTotal
                                 
                         row.append(scan_date)        
                         files.append(','.join(row))
@@ -332,9 +344,15 @@ def main(args):
     procHeader = ['ComputerName', 'Level', 'Module', 'Message', 'PID', 'Name', 'Owner', 'CMD', 'Path', 'ListeningIP',
               'ListeningPort', 'SrcIP', 'SrcPort', 'DstIP', 'DstPort', 'ScanDate']
               
-    fileHeader = ['Created', 'ComputerName', 'Level', 'Module', 'Message', 'Path', 'Score', 'Type', 'SHA256','Details', 'Verified']
+    fileHeader = ['Created', 'ComputerName', 'Level', 'Module', 'Message', 'Path', 'Score', 'Type', 'SHA256','Details']   
+    
+    if args.signed:
+        fileHeader.append('Verified')
+        signed_files = initialize_signed_files(args) 
+        
     if args.v:
         fileHeader.append('VirusTotal')
+        
     fileHeader.append('ScanDate')
     
     files.append(','.join(fileHeader))  # Add the header to the array
@@ -365,7 +383,6 @@ def main(args):
 
             except Exception as e:
                 print(f"An error occurred while deleting '{file_name}': {e}")
-
             
     cnt = 0 #counter for log files
     
@@ -375,7 +392,10 @@ def main(args):
                 cnt += 1
                 input_file_path = os.path.join(args.csvfolder, log_file)
                 
-                loki2csv(input_file_path)
+                if args.signed:
+                    loki2csv(input_file_path,signed_files)
+                else:
+                    loki2csv(input_file_path)
                 
         if cnt == 0:
             print('The folder is either empty or does not have Loki log files!')
@@ -383,7 +403,10 @@ def main(args):
 
     elif args.f:
         print('Processing only one file!: ', args.f)
-        loki2csv(args.f)  
+        if args.signed:
+            loki2csv(args.f, signed_files)  
+        else:
+            loki2csv(args.f) 
 
     
     # These are the MD5 hashes for each loki logs have been processed.
@@ -417,11 +440,13 @@ if __name__ == "__main__":
     argParser.add_argument('-d', '--csvfolder', help="Path to Loki log files", metavar='path', default='')
     argParser.add_argument('-f', help='Loki log file', metavar='log-file', default='')
     argParser.add_argument('-v', action='store_true', help='Query VirusTotal (www.virustotal.com) for malware based on file hash.', default=False)
+    argParser.add_argument('-s', '--signed', help="Path to signed file", metavar='path', default=False)
+
 
     args = argParser.parse_args()
     
     if not (args.f or args.csvfolder):
-        print('Must specify either folder with --csvfolder or one log file with -f.')
+        #print('Must specify either folder with --csvfolder or one log file with -f.')
         # Print complete list of available options and their descriptions
         argParser.print_help()
         sys.exit(1)
