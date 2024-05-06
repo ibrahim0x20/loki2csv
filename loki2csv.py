@@ -27,7 +27,7 @@ def VirustotalSearch(sha256_hash):
     api_key = 'YOUR_API_KEY'
 
     # Replace 'your_sha256_hash' with the SHA-256 hash of the file you want to check
-    #sha256_hash = '06917fc270a0324e8d28da83bedf6d1638bb430876b8336dd326517d33251bb1'
+    #sha256_hash = '*****'
 
     # URL for querying the VirusTotal API
     url = f'https://www.virustotal.com/api/v3/files/{sha256_hash}'
